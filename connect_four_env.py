@@ -62,7 +62,7 @@ class ConnectFourEnv:
         return False, -1
         
     def checkDiagonalStraightUp(self, state, x, y):
-        if x > self.width - 4 or y < 4:
+        if x > self.width - 4 or y < 3:
             return False, -1
         for player in [1, 2]:
             if state[y, x] == player and state[y-1, x+1] == player \
@@ -76,38 +76,42 @@ class ConnectFourEnv:
         if state == None:
             state = self.state
 
-        # Check game draw        
         gameDraw = True
+        gameOver = False
+        winner = -1
         for i in range(self.width):
             for j in range(self.height):
-                if self.state[j, i] == -1:
-                    gameDraw = False
-                    break
-            if gameDraw == False:
+                gameOver, winner = self.checkHorizontalStraight(state, i, j)
+                if gameOver:
+                    break 
+                gameOver, winner = self.checkVerticalStraight(state, i, j)
+                if gameOver:
+                    break 
+                gameOver, winner = self.checkDiagonalStraightDown(state, i, j)
+                if gameOver:
+                    break 
+                gameOver, winner = self.checkDiagonalStraightUp(state, i, j)
+                if gameOver:
+                    break 
+            if gameOver:
                 break
+            
+        if gameOver:
+            return gameOver, winner
+            
+        # Check game draw        
+        if gameOver == False:
+            for i in range(self.width):
+                for j in range(self.height):
+                    if self.state[j, i] == -1:
+                        gameDraw = False
+                        break
+                if gameDraw == False:
+                    break
 
         if gameDraw == True:
             gameOver = True
             winner = -1
-        else:
-            gameOver = False
-            winner = -1
-            for i in range(self.width):
-                for j in range(self.height):
-                    gameOver, winner = self.checkHorizontalStraight(state, i, j)
-                    if gameOver:
-                        break 
-                    gameOver, winner = self.checkVerticalStraight(state, i, j)
-                    if gameOver:
-                        break 
-                    gameOver, winner = self.checkDiagonalStraightDown(state, i, j)
-                    if gameOver:
-                        break 
-                    gameOver, winner = self.checkDiagonalStraightUp(state, i, j)
-                    if gameOver:
-                        break 
-                if gameOver:
-                    break
     
         return gameOver, winner 
     
@@ -245,4 +249,5 @@ def test4():
 if __name__ == '__main__':
     #test1()
     #test2()
-    test3()
+    #test3()
+    test4()

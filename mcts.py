@@ -30,6 +30,7 @@ class MCTS:
         state = orgState.copy()
         turn = self.PLAYER
         history = []
+        expanded = False
 
         for i in range(self.simStepNo):
             if turn == self.PLAYER:
@@ -38,7 +39,15 @@ class MCTS:
                 #action = self.simpleAgent.getAction(state)
                 action = self.getRandomAction(state)
             
-            state, gameOver, winner = self.doAction(state, action, turn, history)
+            stateStr = self.getStateStr(state)
+            stateActionPair = (stateStr, turn, action)
+            if expanded == False and stateActionPair not in self.child:
+                canExpand = True
+                expanded = True
+            else:
+                canExpand = False
+                
+            state, gameOver, winner = self.doAction(state, action, turn, history, canExpand)
                           
             if turn == self.PLAYER:
                 turn = self.OPP
@@ -53,6 +62,7 @@ class MCTS:
                 state = orgState.copy()                
                 turn = self.PLAYER
                 history = []
+                expanded = False
                 continue
 
         self.env.reset()
@@ -68,8 +78,6 @@ class MCTS:
         stateStr = self.getStateStr(state)
         availableActions = self.env.availableActions(state)
         totalStateVisited = 0
-        
-        self.simulate(state)
         
         # check every actions are visited before
         for action in availableActions:
@@ -110,34 +118,36 @@ class MCTS:
             return maxAction
         """
         
-    def doAction(self, state, action, turn, history):
+    def doAction(self, state, action, turn, history, canExpand):
         newState, gameOver, winner = self.env.act(turn, action)
         
         stateStr = self.getStateStr(state)
         newStateStr = self.getStateStr(newState)
         stateActionPair = (stateStr, turn, action)
         newStateActionPair = (newStateStr, turn, action)
-        self.child[stateActionPair] = newStateStr
-        self.parent[newStateActionPair] = stateStr
+        if stateActionPair not in self.child and canExpand:
+            self.child[stateActionPair] = newStateStr
+            self.parent[newStateActionPair] = stateStr
         history.append((stateActionPair, turn))
         return newState, gameOver, winner
         
     def updateTreeInfo(self, winner, history):
         """ Update win result from the current node to the top node """
         
-        print 'history before. winner=%s' % winner
-        self.printHistory(history)
+        #print 'history before. winner=%s' % winner
+        #self.printHistory(history)
         
         for stateActionPair, turn in history:
-            if stateActionPair not in self.visited:
-                self.visited[stateActionPair] = 0
-                self.won[stateActionPair] = 0
-            self.visited[stateActionPair] += 1
-            if turn == winner:
-                self.won[stateActionPair] += 1
+            if stateActionPair in self.child:
+                if stateActionPair not in self.visited:
+                    self.visited[stateActionPair] = 0
+                    self.won[stateActionPair] = 0
+                self.visited[stateActionPair] += 1
+                if turn == winner:
+                    self.won[stateActionPair] += 1
 
-        print 'history after'
-        self.printHistory(history)
+        #print 'history after'
+        #self.printHistory(history)
     
     def printHistory(self, history):
         step = 0
@@ -166,14 +176,16 @@ class MCTS:
             history = []
             while True:
                 action = self.simpleAgent.getAction(state)
+                #action = self.getRandomAction(state)
                 #print 'action1: %s' % action
-                state, gameOver, winner = self.doAction(state, action, self.OPP, history)
+                state, gameOver, winner = self.doAction(state, action, self.OPP, history, True)
                 #time.sleep(0.5)
                 if gameOver:
                     break
+                self.simulate(state)
                 action = self.getAction(state, self.PLAYER, 'gogo')
                 #print 'action2: %s' % action
-                state, gameOver, winner = self.doAction(state, action, self.PLAYER, history)
+                state, gameOver, winner = self.doAction(state, action, self.PLAYER, history, True)
                 #time.sleep(0.5)
                 if gameOver:
                     break
@@ -189,8 +201,8 @@ class MCTS:
             #time.sleep(5)
         
 if __name__ == '__main__':
-    totalGameNo = 1000
-    simStepNo = 300
+    totalGameNo = 3000
+    simStepNo = 100
     #display = True
     display = False
     
