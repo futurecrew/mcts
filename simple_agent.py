@@ -1,10 +1,21 @@
 import random
 
 class SimpleAgent:
-    def __init__(self, env, player, opp):
+    def __init__(self, env, me, opp):
         self.env = env
-        self.player = player
+        self.me = me
         self.opp = opp
+        
+    def isWin(self, state, meX):
+        newState = state.copy()
+        for i in range(self.env.height-1, -1, -1):
+            if newState[i, meX] == -1:
+                newState[i, meX] = self.me
+                gameOver, winner = self.env.checkGameOver(newState)
+                if gameOver:
+                    return True
+                else:
+                    return False
         
     def isDanger(self, state, oppX):
         newState = state.copy()
@@ -18,12 +29,20 @@ class SimpleAgent:
                     return False
             
     def getAction(self, state):
-        for x in range(self.env.width):
+        availableActions = self.env.availableActions(state)
+        
+        if len(availableActions) == 1:
+            return availableActions[0]
+
+        for x in availableActions:
+            if self.isWin(state, x):
+                return x
+            
+        for x in availableActions:
             if self.isDanger(state, x):
                 return x
             
         while True:
-            action = random.randint(0, self.env.width-1)
-            if state[0, action] == -1:
-                return action
+            i = random.randint(0, len(availableActions)-1)
+            return availableActions[i]            
         

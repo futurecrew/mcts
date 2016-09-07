@@ -1,30 +1,48 @@
+import os
 import time
+import cPickle
 import math
+import threading
 import random
 import numpy as np
+import util
 from connect_four_env import ConnectFourEnv
 from simple_agent import SimpleAgent
 from matplotlib.style.core import available
 
 class MCTS:
-    def __init__(self, totalGameNo, simStepNo, display):
-        self.totalGameNo = totalGameNo
-        self.simStepNo = simStepNo
-        self.display = display
-        self.env = ConnectFourEnv(display)
-        self.child = {}              # (stateStr, turn, action), childStateStr
-        self.parent = {}           # (stateStr, turn, action), parentStateStr 
+    def __init__(self, settings):
+        self.settings = settings
+        self.totalGameNo = settings['total_game_no']
+        self.simStepNo = settings['sim_step_no']
+        self.display = settings['display']
+        self.env = ConnectFourEnv(self.display)
         self.visited = {}           # (stateStr, turn, action), visited
         self.won = {}              # (stateStr, turn, action), won
         self.DRAW = -1
         self.PLAYER = 1
         self.OPP = 2
-        self.simpleAgent = SimpleAgent(self.env, self.PLAYER, self.OPP)
+        self.simpleAgent = SimpleAgent(self.env, self.OPP, self.PLAYER)
         self.winnerResult = {self.DRAW:0, self.PLAYER:0, self.OPP:0}
         self.greedyEpsilon = 0.1
+
+        self.startTime = time.strftime('%Y%m%d_%H%M%S')
+        logFile="output/%s.log" % (self.startTime)            
+        util.Logger(logFile)
+
+        self.testMode = False
+        self.debugger = DebugInput(self).start()
+
+    def printEnv(self):
+        print 'Start time: %s' % self.startTime
+        print '[ Running Environment ]'
+        for key in self.settings.keys():
+            print '{} : '.format(key).ljust(30) + '{}'.format(self.settings[key])
+        print 'width: %s, height: %s' % (self.env.width, self.env.height)
     
     def getStateStr(self, state):
-        return np.array_str(state)
+        #return np.array_str(state)
+        return hash(state.tostring())
     
     def simulate(self, orgState):
         state = orgState.copy()
@@ -34,20 +52,44 @@ class MCTS:
 
         for i in range(self.simStepNo):
             if turn == self.PLAYER:
-                action = self.getAction(state, self.PLAYER, 'simulate')
+                availableActions = self.env.availableActions(state)
+                stateStr = self.getStateStr(state)
+                totalStateVisited = 0
+                # check every actions are visited before
+                for action in availableActions:
+                    stateActionPair = (stateStr, turn, action)
+                    if stateActionPair in self.visited:
+                        totalStateVisited += self.visited[stateActionPair]
+                    else:
+                        totalStateVisited = 0
+
+                if totalStateVisited == 0:
+                    action = self.getRandomAction(state)
+                else:
+                    maxUpperBound = 0            
+                    for action in availableActions:
+                        stateActionPair = (stateStr, turn, action)
+                        won = self.won.get(stateActionPair, 0)
+                        visited = max(self.visited.get(stateActionPair, 1), 1)
+                        winRatio = float(won) / visited
+                        upperBound = winRatio + math.sqrt(2 * math.log(totalStateVisited) / visited)
+                        if upperBound >= maxUpperBound:
+                            maxUpperBound = upperBound
+                            selectedAction = action
+                    action = selectedAction
             elif turn == self.OPP:
                 #action = self.simpleAgent.getAction(state)
                 action = self.getRandomAction(state)
             
             stateStr = self.getStateStr(state)
             stateActionPair = (stateStr, turn, action)
-            if expanded == False and stateActionPair not in self.child:
+            if expanded == False and stateActionPair not in self.visited:
                 canExpand = True
                 expanded = True
             else:
                 canExpand = False
                 
-            state, gameOver, winner = self.doAction(state, action, turn, history, canExpand)
+            state, gameOver, winner = self.doAction(state, action, turn, history, canExpand, False)
                           
             if turn == self.PLAYER:
                 turn = self.OPP
@@ -74,60 +116,57 @@ class MCTS:
         actionIndex = random.randint(0, len(availableActions)-1)
         return availableActions[actionIndex]
 
-    def getAction(self, state, turn, fromF):
-        stateStr = self.getStateStr(state)
+    def getAction(self, state, turn):
         availableActions = self.env.availableActions(state)
-        totalStateVisited = 0
         
-        # check every actions are visited before
+        if len(availableActions) == 1:
+            return availableActions[0]
+        
+        maxAction = -1
+        maxWinRatio = 0
+        availableActions = self.env.availableActions(state)
+        stateStr = self.getStateStr(state)
         for action in availableActions:
             stateActionPair = (stateStr, turn, action)
-            if stateActionPair in self.visited and self.visited[stateActionPair] > 0:
-                totalStateVisited += self.visited[stateActionPair]
-            else:
-                totalStateVisited = 0
-                break
+            if stateActionPair not in self.visited:
+                continue
+            winRatio = float(self.won.get(stateActionPair, 0)) / max(self.visited.get(stateActionPair, 1), 1)
+            if winRatio >= maxWinRatio:
+                maxWinRatio = winRatio
+                maxAction = action
 
-        if totalStateVisited > 0:
-            maxUpperBound = 0            
-            if fromF =='gogo':
-                pass
+        return maxAction
+        
+    def getActionEGreedy(self, state, turn):
+        if random.random() < self.greedyEpsilon and self.testMode == False:
+            return self.getRandomAction(state)
+        else:
+            maxAction = -1
+            maxWinRatio = 0
+            availableActions = self.env.availableActions(state)
+            stateStr = self.getStateStr(state)
             for action in availableActions:
                 stateActionPair = (stateStr, turn, action)
-                winRatio = float(self.won[stateActionPair]) / self.visited[stateActionPair]
-                upperBound = winRatio + math.sqrt(2 * math.log(totalStateVisited) / self.visited[stateActionPair])
-                if upperBound >= maxUpperBound:
-                    maxUpperBound = upperBound
-                    selectedAction = action
-            return selectedAction
-        else:
-            return self.getRandomAction(state, availableActions)
-        """
-        if random.random() < self.greedyEpsilon:
-            #print 'getAction return2'
-            return self.getRandomAction(availableActions)
-        else:
-            maxAction = 0
-            maxWinRatio = 0
-            for action, childStateStr in zip(self.childAction[stateStr], self.children[stateStr]):
-                winRatio = float(self.won[childStateStr]) / self.visited[childStateStr]
-                if winRatio > maxWinRatio:
+                if stateActionPair not in self.visited:
+                    continue
+                winRatio = float(self.won.get(stateActionPair, 0)) / max(self.visited.get(stateActionPair, 1), 1)
+                if winRatio >= maxWinRatio:
                     maxWinRatio = winRatio
                     maxAction = action
-            #print 'getAction return3'
-            return maxAction
-        """
+
+            if maxAction != -1:
+                return maxAction
+            else:    
+                return self.getRandomAction(state)
         
-    def doAction(self, state, action, turn, history, canExpand):
-        newState, gameOver, winner = self.env.act(turn, action)
+    def doAction(self, state, action, turn, history, canExpand, display):
+        newState, gameOver, winner = self.env.act(turn, action, display)
         
         stateStr = self.getStateStr(state)
-        newStateStr = self.getStateStr(newState)
         stateActionPair = (stateStr, turn, action)
-        newStateActionPair = (newStateStr, turn, action)
-        if stateActionPair not in self.child and canExpand:
-            self.child[stateActionPair] = newStateStr
-            self.parent[newStateActionPair] = stateStr
+        if stateActionPair not in self.visited and canExpand:
+            self.visited[stateActionPair] = 0
+            self.won[stateActionPair] = 0
         history.append((stateActionPair, turn))
         return newState, gameOver, winner
         
@@ -138,10 +177,7 @@ class MCTS:
         #self.printHistory(history)
         
         for stateActionPair, turn in history:
-            if stateActionPair in self.child:
-                if stateActionPair not in self.visited:
-                    self.visited[stateActionPair] = 0
-                    self.won[stateActionPair] = 0
+            if stateActionPair in self.visited:
                 self.visited[stateActionPair] += 1
                 if turn == winner:
                     self.won[stateActionPair] += 1
@@ -153,7 +189,7 @@ class MCTS:
         step = 0
         print '\n[ history ]'
         for stateActionPair, turn in history:
-            stateStr, turn2, action = stateActionPair
+            state, turn2, action = stateActionPair
             if stateActionPair in self.visited:
                 visited = self.visited[stateActionPair]
                 won = self.won[stateActionPair]
@@ -169,43 +205,100 @@ class MCTS:
     def printResult(self):
         print 'total states: %s' % len(self.visited)
                     
+    def save(self, step):
+        if os.path.exists('snapshot') == False:
+            os.makedirs('snapshot')
+        fileName = 'snapshot/mcts_%s' % step
+        with open(fileName + '.pickle', 'wb') as f:
+            cPickle.dump(self, f)
+        
     def gogo(self):
+        lastResult = []
+        lastResultWin = 0
         for i in range(self.totalGameNo):
             self.env.reset()
             state = self.env.getState()
             history = []
+            turn = random.randint(self.PLAYER, self.OPP)
+
             while True:
-                action = self.simpleAgent.getAction(state)
-                #action = self.getRandomAction(state)
-                #print 'action1: %s' % action
-                state, gameOver, winner = self.doAction(state, action, self.OPP, history, True)
-                #time.sleep(0.5)
+                if turn == self.PLAYER:
+                    self.simulate(state)
+                    if settings['player_action'] == 'egreedy':
+                        action = self.getActionEGreedy(state, self.PLAYER)
+                    else:
+                        action = self.getAction(state, self.PLAYER)
+                    state, gameOver, winner = self.doAction(state, action, self.PLAYER, history, True, True)
+                elif turn == self.OPP:
+                    action = self.simpleAgent.getAction(state)
+                    state, gameOver, winner = self.doAction(state, action, self.OPP, history, True, True)
+
                 if gameOver:
                     break
-                self.simulate(state)
-                action = self.getAction(state, self.PLAYER, 'gogo')
-                #print 'action2: %s' % action
-                state, gameOver, winner = self.doAction(state, action, self.PLAYER, history, True)
-                #time.sleep(0.5)
-                if gameOver:
-                    break
+                
+                if turn == self.PLAYER:
+                    turn = self.OPP
+                else:
+                    turn = self.PLAYER
             
+            self.winnerResult[winner] += 1
             if winner == -1:
                 print 'Game draw'
             else:
                 mcts.updateTreeInfo(winner, history)
-                self.winnerResult[winner] += 1                
+                if winner == self.PLAYER:
+                    lastResultWin += 1
+                if len(lastResult) == 100:
+                    todel = lastResult.pop(0)
+                    if todel == 1:
+                        lastResultWin -= 1
+                lastResult.append(winner)
+                lastRatio = float(lastResultWin) * 100 / len(lastResult)
                 #mcts.printResult()
-                print 'Player %s won' % winner
-                print 'winnerResult: %s' % self.winnerResult
+                winRatio = float(self.winnerResult[self.PLAYER]) * 100 \
+                                     / (self.winnerResult[self.OPP] + self.winnerResult[self.PLAYER])
+                print 'Player %s won. %s' % (winner, "Full" if self.env.isFull(state) else "")
+                print 'winnerResult: %s, total=%.0f%%, last 100=%.0f%%' % (self.winnerResult, winRatio, lastRatio)
+            
+            if i > 0 and i % 5000 == 0:
+                self.save(i)
             #time.sleep(5)
+    
+        self.debugger.finish()
+    
+class DebugInput(threading.Thread):
+    def __init__(self, player):
+        threading.Thread.__init__(self)
+        self.player = player
+        self.running = True
+    
+    def run(self):
+        time.sleep(2)
+        while (self.running):
+            input = raw_input('')
+            if input == 'd':
+                if self.player.env.display:
+                    self.player.env.closeDisplay()
+                else:
+                    self.player.env.initDisplay()
+                print 'Display : %s' % self.player.env.display
+            elif input == 't':
+                self.player.testMode = not self.player.testMode
+                print 'Test mode : %s' % self.player.testMode
+                
+    def finish(self):
+        self.running = False
         
 if __name__ == '__main__':
-    totalGameNo = 3000
-    simStepNo = 100
-    #display = True
-    display = False
+    settings = {}
+    settings['total_game_no'] = 100000
+    settings['sim_step_no'] = 1000
+    #settings['display'] = True
+    settings['display'] = False
+    #settings['player_action'] = 'egreedy'
+    settings['player_action'] = 'mcts'
     
-    mcts = MCTS(totalGameNo, simStepNo, display)
+    mcts = MCTS(settings)
+    mcts.printEnv()
     mcts.gogo()
         

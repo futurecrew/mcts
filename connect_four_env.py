@@ -8,27 +8,36 @@ class ConnectFourEnv:
         self.display = display
         self.width = 7
         self.height = 6
+        #self.width = 6
+        #self.height = 5
+        self.screenWidth = 640
+        self.screenHeight = 480
         if self.display:
-            pygame.init()
-            self.screenWidth = 640
-            self.screenHeight = 480
-            self.screen=pygame.display.set_mode([self.screenWidth, self.screenHeight])
+            self.initDisplay()
         self.reset()
+        
+    def initDisplay(self):
+        pygame.init()
+        self.screen=pygame.display.set_mode([self.screenWidth, self.screenHeight])
+        self.display = True
+        
+    def closeDisplay(self):
+        self.display = False
+        pygame.display.quit()
         
     def reset(self):
         self.state = np.zeros((self.height, self.width), dtype=np.int)
         self.state.fill(-1)
         self.gameOver = False
+        self.BLACK = (  0,   0,   0)
+        self.WHITE = (255, 255, 255)
+        self.BLUE =  (  0,   0, 255)
+        self.GREEN = (  0, 255,   0)
+        self.RED =   (255,   0,   0)
+        self.oneGridWidth = self.screenWidth / self.width
+        self.oneGridHeight = self.screenHeight / self.height
         if self.display:
-            self.BLACK = (  0,   0,   0)
-            self.WHITE = (255, 255, 255)
-            self.BLUE =  (  0,   0, 255)
-            self.GREEN = (  0, 255,   0)
-            self.RED =   (255,   0,   0)
             self.screen.fill(self.WHITE)
-            self.oneGridWidth = self.screenWidth / self.width
-            self.oneGridHeight = self.screenHeight / self.height
-            
             for x in range(self.width):
                 pygame.draw.line(self.screen, self.BLACK, (x*self.oneGridWidth, 0), (x*self.oneGridWidth, self.screenHeight))
             for y in range(self.height):
@@ -127,8 +136,14 @@ class ConnectFourEnv:
     
     def setState(self, state):
         self.state = state.copy()
+    
+    def isFull(self, state):
+        if -1 in state:
+            return False
+        else:
+            return True
         
-    def act(self, player, action):
+    def act(self, player, action, display=False):
         if self.gameOver == True:
             print 'This game is already over. Call reset() to restart the game.'
             return self.state.copy(), True, None
@@ -144,7 +159,7 @@ class ConnectFourEnv:
                 self.state[i, x] = player
                 break
         
-        if self.display:
+        if self.display and display:
             for i in range(self.width):
                 for j in range(self.height):
                     if self.state[j, i] != -1:
@@ -155,6 +170,7 @@ class ConnectFourEnv:
                         pygame.draw.circle(self.screen, color, [x ,y], radius, 0)
                         #print 'draw (%s, %s)' % (x, y)
             pygame.display.flip()
+            time.sleep(0.5)
         
         gameOver, winner = self.checkGameOver()
 
@@ -230,13 +246,13 @@ def test4():
     state = env.getState()
     while True:
         acttion1 = simpleAgent1.getAction(state)
-        state, gameOver, winner = env.act(1, acttion1)
-        time.sleep(0.5)
+        state, gameOver, winner = env.act(1, acttion1, True)
+        time.sleep(0.3)
         if gameOver:
             break
         acttion2 = simpleAgent2.getAction(state)
-        state, gameOver, winner = env.act(2, acttion2)
-        time.sleep(0.5)
+        state, gameOver, winner = env.act(2, acttion2, True)
+        time.sleep(0.3)
         if gameOver:
             break
     
