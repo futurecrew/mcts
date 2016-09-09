@@ -9,6 +9,7 @@ import util
 from connect_four_env import ConnectFourEnv
 from simple_agent import SimpleAgent
 from matplotlib.style.core import available
+from multiprocessing import Process, Queue
 
 class MCTS:
     def __init__(self, settings):
@@ -16,6 +17,7 @@ class MCTS:
         self.totalGameNo = settings['total_game_no']
         self.playedGameNo = 0
         self.simStepNo = settings['sim_step_no']
+        self.saveStepNo = settings['save_step_no']
         self.display = settings['display']
         self.env = ConnectFourEnv(self.display)
         self.visited = {}           # (stateStr, turn, action), visited
@@ -31,8 +33,25 @@ class MCTS:
         logFile="output/%s.log" % (self.startTime)            
         util.Logger(logFile)
 
+        self.initializeProcesses()
+
         self.testMode = False
         self.debugger = DebugInput(self).start()
+
+    def initializeProcesses(self):
+        # Multi process jobs
+        self.multiCpuNo = self.settings['multi_cpu_no']
+        self.queueList = []
+        self.processList = []
+        self.queueChild2Parent = Queue()
+        for i in range(self.multiCpuNo):        
+            queueParent2Child = Queue()
+            self.queueList.append(queueParent2Child)
+            #print 'creating a child process[%s]' % i
+            p = Process(target=self.simulateOne, args=(i, self.simStepNo / self.multiCpuNo, 
+                                                       queueParent2Child, self.queueChild2Parent))
+            p.start()
+            self.processList.append(p)
 
     def printEnv(self):
         print 'Start time: %s' % self.startTime
@@ -46,72 +65,114 @@ class MCTS:
         return hash(state.tostring())
     
     def simulate(self, orgState):
-        state = orgState.copy()
-        turn = self.PLAYER
-        history = []
-        expanded = False
+        time1 = time.time()
+        for i in range(self.multiCpuNo):
+            self.queueList[i].put((orgState, self.visited, self.won))
+            
+        finishedChildNo = 0
+        for i in range(self.multiCpuNo):
+            childID, winnerList, historyList, expandedList = self.queueChild2Parent.get()
+            
+            for expandedNode in expandedList:
+                if expandedNode not in self.visited:
+                    self.visited[expandedNode] = 0
+                    self.won[expandedNode] = 0
+            
+            for winner, history in zip(winnerList, historyList):
+                self.updateTreeInfo(winner, history)
+            
+            finishedChildNo += 1
+            
+            #print 'simulateOne done %s' % childID
+            if finishedChildNo == self.multiCpuNo:
+                break
+        #print 'all simulateOne finished'
+        time2 = time.time()
+        
+        #print 'simulte took %.2f sec' % (time2 - time1)
+        
 
-        for i in range(self.simStepNo):
-            if turn == self.PLAYER:
-                availableActions = self.env.availableActions(state)
-                stateStr = self.getStateStr(state)
-                totalStateVisited = 0
-                # check every actions are visited before
-                for action in availableActions:
-                    stateActionPair = (stateStr, turn, action)
-                    if stateActionPair in self.visited:
-                        totalStateVisited += self.visited[stateActionPair]
-                    else:
-                        totalStateVisited = 0
+    def simulateOne(self, id, simStepNo, queueParent2Child, queueChild2Parent):
+        while True:
+            orgState, visited, won = queueParent2Child.get()
+            self.visited = visited
+            self.won = won
+            self.env.reset()
+            self.env.setState(orgState)
+            
+            self.visited['haha'] = 'dj'
 
-                if totalStateVisited == 0:
-                    action = self.getRandomAction(state)
-                else:
-                    maxUpperBound = 0            
+            historyList = []
+            winnerList = []
+            expandedList = []
+            state = orgState.copy()
+            turn = self.PLAYER
+            history = []
+            expanded = False
+    
+            for i in range(simStepNo):
+                if turn == self.PLAYER:
+                    availableActions = self.env.availableActions(state)
+                    stateStr = self.getStateStr(state)
+                    totalStateVisited = 0
+                    # check every actions are visited before
                     for action in availableActions:
                         stateActionPair = (stateStr, turn, action)
-                        won = self.won.get(stateActionPair, 0)
-                        visited = max(self.visited.get(stateActionPair, 1), 1)
-                        winRatio = float(won) / visited
-                        upperBound = winRatio + math.sqrt(2 * math.log(totalStateVisited) / visited)
-                        if upperBound >= maxUpperBound:
-                            maxUpperBound = upperBound
-                            selectedAction = action
-                    action = selectedAction
-            elif turn == self.OPP:
-                if 'sim_opp_policy' in self.settings and self.settings['sim_opp_policy'] == 'simple':
-                    action = self.simpleAgent.getAction(state)
-                else:
-                    action = self.getRandomAction(state)
-            
-            stateStr = self.getStateStr(state)
-            stateActionPair = (stateStr, turn, action)
-            if expanded == False and stateActionPair not in self.visited:
-                canExpand = True
-                expanded = True
-            else:
-                canExpand = False
+                        if stateActionPair in self.visited:
+                            totalStateVisited += self.visited[stateActionPair]
+                        else:
+                            totalStateVisited = 0
+    
+                    if totalStateVisited == 0:
+                        action = self.getRandomAction(state)
+                    else:
+                        maxUpperBound = 0            
+                        for action in availableActions:
+                            stateActionPair = (stateStr, turn, action)
+                            won = self.won.get(stateActionPair, 0)
+                            visited = max(self.visited.get(stateActionPair, 1), 1)
+                            winRatio = float(won) / visited
+                            upperBound = winRatio + math.sqrt(2 * math.log(totalStateVisited) / visited)
+                            if upperBound >= maxUpperBound:
+                                maxUpperBound = upperBound
+                                selectedAction = action
+                        action = selectedAction
+                elif turn == self.OPP:
+                    if 'sim_opp_policy' in self.settings and self.settings['sim_opp_policy'] == 'simple':
+                        action = self.simpleAgent.getAction(state)
+                    else:
+                        action = self.getRandomAction(state)
                 
-            state, gameOver, winner = self.doAction(state, action, turn, history, canExpand, False)
-                          
-            if turn == self.PLAYER:
-                turn = self.OPP
-            else:
-                turn = self.PLAYER
-
-            if gameOver:
-                self.updateTreeInfo(winner, history)
-                # restart sim
-                self.env.reset()
-                self.env.setState(orgState)
-                state = orgState.copy()                
-                turn = self.PLAYER
-                history = []
-                expanded = False
-                continue
-
-        self.env.reset()
-        self.env.setState(orgState)       # restore back the environment state
+                stateStr = self.getStateStr(state)
+                stateActionPair = (stateStr, turn, action)
+                if expanded == False and stateActionPair not in self.visited:
+                    canExpand = True
+                    expanded = True
+                else:
+                    canExpand = False
+                    
+                state, gameOver, winner = self.doAction(state, action, turn, history, expandedList, canExpand, False)
+                              
+                if turn == self.PLAYER:
+                    turn = self.OPP
+                else:
+                    turn = self.PLAYER
+    
+                if gameOver:
+                    self.updateTreeInfo(winner, history)
+                    historyList.append(history)
+                    winnerList.append(winner)
+                    
+                    # restart sim
+                    self.env.reset()
+                    self.env.setState(orgState)
+                    state = orgState.copy()                
+                    turn = self.PLAYER
+                    history = []
+                    expanded = False
+                    continue
+    
+            queueChild2Parent.put((id, winnerList, historyList, expandedList))
 
     def getRandomAction(self, state, availableActions=None):
         if availableActions == None:
@@ -140,29 +201,7 @@ class MCTS:
 
         return maxAction
         
-    def getActionEGreedy(self, state, turn):
-        if random.random() < self.greedyEpsilon and self.testMode == False:
-            return self.getRandomAction(state)
-        else:
-            maxAction = -1
-            maxWinRatio = 0
-            availableActions = self.env.availableActions(state)
-            stateStr = self.getStateStr(state)
-            for action in availableActions:
-                stateActionPair = (stateStr, turn, action)
-                if stateActionPair not in self.visited:
-                    continue
-                winRatio = float(self.won.get(stateActionPair, 0)) / max(self.visited.get(stateActionPair, 1), 1)
-                if winRatio >= maxWinRatio:
-                    maxWinRatio = winRatio
-                    maxAction = action
-
-            if maxAction != -1:
-                return maxAction
-            else:    
-                return self.getRandomAction(state)
-        
-    def doAction(self, state, action, turn, history, canExpand, display):
+    def doAction(self, state, action, turn, history, expandedList, canExpand, display):
         newState, gameOver, winner = self.env.act(turn, action, display)
         
         stateStr = self.getStateStr(state)
@@ -170,23 +209,26 @@ class MCTS:
         if stateActionPair not in self.visited and canExpand:
             self.visited[stateActionPair] = 0
             self.won[stateActionPair] = 0
-        history.append((stateActionPair, turn))
+            if expandedList != None:
+                expandedList.append(stateActionPair)
+        history.append(stateActionPair)
         return newState, gameOver, winner
         
     def updateTreeInfo(self, winner, history):
         """ Update win result from the current node to the top node """
 
-        for stateActionPair, turn in history:
+        for stateActionPair in history:
             if stateActionPair in self.visited:
                 self.visited[stateActionPair] += 1
+                _, turn, _ = stateActionPair
                 if turn == winner:
                     self.won[stateActionPair] += 1
     
     def printHistory(self, history):
         step = 0
         print '\n[ history ]'
-        for stateActionPair, turn in history:
-            state, turn2, action = stateActionPair
+        for stateActionPair in history:
+            state, turn, action = stateActionPair
             if stateActionPair in self.visited:
                 visited = self.visited[stateActionPair]
                 won = self.won[stateActionPair]
@@ -217,7 +259,8 @@ class MCTS:
             state = self.env.getState()
             history = []
             turn = random.randint(self.PLAYER, self.OPP)
-
+            startTime = time.time()
+            
             while True:
                 if turn == self.PLAYER:
                     self.simulate(state)
@@ -231,7 +274,7 @@ class MCTS:
                     else:
                         action = self.simpleAgent.getAction(state)
                 
-                state, gameOver, winner = self.doAction(state, action, turn, history, True, True)
+                state, gameOver, winner = self.doAction(state, action, turn, history, None, True, True)
 
                 if gameOver:
                     break
@@ -240,6 +283,8 @@ class MCTS:
                     turn = self.OPP
                 else:
                     turn = self.PLAYER
+
+            elapsed = time.time() - startTime
             
             if settings['opponent'] == 'user':
                 self.env.showWinner(winner)
@@ -267,9 +312,9 @@ class MCTS:
                     winStr = 'Win'
                 else:
                     winStr = 'Lose'
-                print 'Game %s : %s, %s, total=%.0f%%, last 100=%.0f%%' % (self.playedGameNo, self.winnerResult, winStr, winRatio, lastRatio)
+                print 'Game %s : %s, %s, total=%.0f%%, last 100=%.0f%%, %.1fs' % (self.playedGameNo, self.winnerResult, winStr, winRatio, lastRatio, elapsed)
             
-            if i > 0 and i % 5000 == 0:
+            if i > 0 and i % self.saveStepNo == 0:
                 self.save(i)
             #time.sleep(5)
     
@@ -309,10 +354,12 @@ def load(savedFile):
 if __name__ == '__main__':
     settings = {}
     settings['total_game_no'] = 100000
-    settings['sim_step_no'] = 1000
+    settings['sim_step_no'] = 10000
+    settings['save_step_no'] = 100
     #settings['display'] = True
     settings['display'] = False
     settings['player_action'] = 'mcts'
+    settings['multi_cpu_no'] = 7
 
     #settings['opponent'] = 'user'
     settings['opponent'] = 'simpleAgent'
