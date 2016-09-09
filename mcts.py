@@ -33,8 +33,6 @@ class MCTS:
         logFile="output/%s.log" % (self.startTime)            
         util.Logger(logFile)
 
-        self.initializeProcesses()
-
         self.testMode = False
         self.debugger = DebugInput(self).start()
 
@@ -52,6 +50,13 @@ class MCTS:
                                                        queueParent2Child, self.queueChild2Parent))
             p.start()
             self.processList.append(p)
+
+    def __getstate__(self):
+        d = dict(self.__dict__)
+        del d['queueList']
+        del d['processList']
+        del d['queueChild2Parent']
+        return d
 
     def printEnv(self):
         print 'Start time: %s' % self.startTime
@@ -252,6 +257,8 @@ class MCTS:
             pickle.dump(self, f)
         
     def gogo(self):
+        self.initializeProcesses()
+
         lastResult = []
         lastResultWin = 0
         for i in range(self.totalGameNo):
@@ -314,8 +321,8 @@ class MCTS:
                     winStr = 'Lose'
                 print 'Game %s : %s, %s, total=%.0f%%, last 100=%.0f%%, %.1fs' % (self.playedGameNo, self.winnerResult, winStr, winRatio, lastRatio, elapsed)
             
-            if i > 0 and i % self.saveStepNo == 0:
-                self.save(i)
+            if self.playedGameNo % self.saveStepNo == 0:
+                self.save(self.playedGameNo)
             #time.sleep(5)
     
         self.debugger.finish()
@@ -343,10 +350,15 @@ class DebugInput(threading.Thread):
     def finish(self):
         self.running = False
     
-def load(savedFile):
+def load(savedFile, settings):
     with open(savedFile) as f:
         print 'Loading %s' % savedFile
         loaded = pickle.load(f)
+        loaded.env.display = settings['display']
+        if loaded.env.display == True:
+            loaded.env.initDisplay()
+        loaded.settings['opponent'] = settings['opponent']
+        loaded.settings['sim_opp_policy'] = settings['sim_opp_policy']
         print 'Loading done'
         return loaded
     print 'Error while open %s' % savedFile
@@ -361,8 +373,8 @@ if __name__ == '__main__':
     settings['player_action'] = 'mcts'
     settings['multi_cpu_no'] = 7
 
-    #settings['opponent'] = 'user'
-    settings['opponent'] = 'simpleAgent'
+    settings['opponent'] = 'user'
+    #settings['opponent'] = 'simpleAgent'
     
     settings['sim_opp_policy'] = 'simple'
     #settings['sim_opp_policy'] = 'random'
@@ -370,8 +382,8 @@ if __name__ == '__main__':
     if settings['opponent'] == 'user':
         settings['display'] = True
         
-    #mcts = load('snapshot/mcts_5000.pickle')
-    mcts = MCTS(settings)
+    mcts = load('snapshot/mcts_100.pickle', settings)
+    #mcts = MCTS(settings)
     
     mcts.printEnv()
     mcts.gogo()
