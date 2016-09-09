@@ -1,6 +1,6 @@
 import os
 import time
-import cPickle
+import pickle
 import math
 import threading
 import random
@@ -14,6 +14,7 @@ class MCTS:
     def __init__(self, settings):
         self.settings = settings
         self.totalGameNo = settings['total_game_no']
+        self.playedGameNo = 0
         self.simStepNo = settings['sim_step_no']
         self.display = settings['display']
         self.env = ConnectFourEnv(self.display)
@@ -78,8 +79,10 @@ class MCTS:
                             selectedAction = action
                     action = selectedAction
             elif turn == self.OPP:
-                #action = self.simpleAgent.getAction(state)
-                action = self.getRandomAction(state)
+                if 'sim_opp_policy' in self.settings and self.settings['sim_opp_policy'] == 'simple':
+                    action = self.simpleAgent.getAction(state)
+                else:
+                    action = self.getRandomAction(state)
             
             stateStr = self.getStateStr(state)
             stateActionPair = (stateStr, turn, action)
@@ -172,18 +175,12 @@ class MCTS:
         
     def updateTreeInfo(self, winner, history):
         """ Update win result from the current node to the top node """
-        
-        #print 'history before. winner=%s' % winner
-        #self.printHistory(history)
-        
+
         for stateActionPair, turn in history:
             if stateActionPair in self.visited:
                 self.visited[stateActionPair] += 1
                 if turn == winner:
                     self.won[stateActionPair] += 1
-
-        #print 'history after'
-        #self.printHistory(history)
     
     def printHistory(self, history):
         step = 0
@@ -210,7 +207,7 @@ class MCTS:
             os.makedirs('snapshot')
         fileName = 'snapshot/mcts_%s' % step
         with open(fileName + '.pickle', 'wb') as f:
-            cPickle.dump(self, f)
+            pickle.dump(self, f)
         
     def gogo(self):
         lastResult = []
@@ -228,10 +225,13 @@ class MCTS:
                         action = self.getActionEGreedy(state, self.PLAYER)
                     else:
                         action = self.getAction(state, self.PLAYER)
-                    state, gameOver, winner = self.doAction(state, action, self.PLAYER, history, True, True)
                 elif turn == self.OPP:
-                    action = self.simpleAgent.getAction(state)
-                    state, gameOver, winner = self.doAction(state, action, self.OPP, history, True, True)
+                    if settings['opponent'] == 'user':
+                        action = self.env.getManualAction(state)
+                    else:
+                        action = self.simpleAgent.getAction(state)
+                
+                state, gameOver, winner = self.doAction(state, action, turn, history, True, True)
 
                 if gameOver:
                     break
@@ -240,6 +240,11 @@ class MCTS:
                     turn = self.OPP
                 else:
                     turn = self.PLAYER
+            
+            if settings['opponent'] == 'user':
+                self.env.showWinner(winner)
+                
+            self.playedGameNo += 1
             
             self.winnerResult[winner] += 1
             if winner == -1:
@@ -257,8 +262,12 @@ class MCTS:
                 #mcts.printResult()
                 winRatio = float(self.winnerResult[self.PLAYER]) * 100 \
                                      / (self.winnerResult[self.OPP] + self.winnerResult[self.PLAYER])
-                print 'Player %s won. %s' % (winner, "Full" if self.env.isFull(state) else "")
-                print 'winnerResult: %s, total=%.0f%%, last 100=%.0f%%' % (self.winnerResult, winRatio, lastRatio)
+                
+                if winner == 1:
+                    winStr = 'Win'
+                else:
+                    winStr = 'Lose'
+                print 'Game %s : %s, %s, total=%.0f%%, last 100=%.0f%%' % (self.playedGameNo, self.winnerResult, winStr, winRatio, lastRatio)
             
             if i > 0 and i % 5000 == 0:
                 self.save(i)
@@ -288,6 +297,14 @@ class DebugInput(threading.Thread):
                 
     def finish(self):
         self.running = False
+    
+def load(savedFile):
+    with open(savedFile) as f:
+        print 'Loading %s' % savedFile
+        loaded = pickle.load(f)
+        print 'Loading done'
+        return loaded
+    print 'Error while open %s' % savedFile
         
 if __name__ == '__main__':
     settings = {}
@@ -295,10 +312,20 @@ if __name__ == '__main__':
     settings['sim_step_no'] = 1000
     #settings['display'] = True
     settings['display'] = False
-    #settings['player_action'] = 'egreedy'
     settings['player_action'] = 'mcts'
+
+    #settings['opponent'] = 'user'
+    settings['opponent'] = 'simpleAgent'
     
+    settings['sim_opp_policy'] = 'simple'
+    #settings['sim_opp_policy'] = 'random'
+    
+    if settings['opponent'] == 'user':
+        settings['display'] = True
+        
+    #mcts = load('snapshot/mcts_5000.pickle')
     mcts = MCTS(settings)
+    
     mcts.printEnv()
     mcts.gogo()
         

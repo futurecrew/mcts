@@ -1,4 +1,5 @@
 import pygame
+import pygame.font
 import time
 import numpy as np
 from simple_agent import SimpleAgent
@@ -12,6 +13,8 @@ class ConnectFourEnv:
         #self.height = 5
         self.screenWidth = 640
         self.screenHeight = 480
+        self.manualPos = -1
+        self.winner = 0
         if self.display:
             self.initDisplay()
         self.reset()
@@ -19,7 +22,9 @@ class ConnectFourEnv:
     def initDisplay(self):
         pygame.init()
         self.screen=pygame.display.set_mode([self.screenWidth, self.screenHeight])
+        self.fontobject = pygame.font.SysFont('Arial', 50)
         self.display = True
+        print 'initDisplay()'
         
     def closeDisplay(self):
         self.display = False
@@ -29,6 +34,7 @@ class ConnectFourEnv:
         self.state = np.zeros((self.height, self.width), dtype=np.int)
         self.state.fill(-1)
         self.gameOver = False
+        self.winner = 0
         self.BLACK = (  0,   0,   0)
         self.WHITE = (255, 255, 255)
         self.BLUE =  (  0,   0, 255)
@@ -36,12 +42,6 @@ class ConnectFourEnv:
         self.RED =   (255,   0,   0)
         self.oneGridWidth = self.screenWidth / self.width
         self.oneGridHeight = self.screenHeight / self.height
-        if self.display:
-            self.screen.fill(self.WHITE)
-            for x in range(self.width):
-                pygame.draw.line(self.screen, self.BLACK, (x*self.oneGridWidth, 0), (x*self.oneGridWidth, self.screenHeight))
-            for y in range(self.height):
-                pygame.draw.line(self.screen, self.BLACK, (0, y*self.oneGridHeight), (self.screenWidth, y*self.oneGridHeight))
         
     def checkHorizontalStraight(self, state, x, y):
         if x > self.width - 4:
@@ -142,6 +142,76 @@ class ConnectFourEnv:
             return False
         else:
             return True
+
+    def getManualAction(self, state):
+        availableActions = self.availableActions(state)
+        pos = self.width / 2
+        self.drawStage()
+        
+        while True:
+            for event in pygame.event.get():
+                keystate = pygame.key.get_pressed()
+                if keystate[pygame.K_LEFT]:
+                    pos -= 1
+                    if pos == -1:
+                        pos = 0
+                if keystate[pygame.K_RIGHT]:
+                    pos += 1
+                    if pos == self.width:
+                        pos = self.width - 1
+                if keystate[pygame.K_DOWN] or keystate[pygame.K_RETURN]:
+                    if pos in availableActions:
+                        self.manualPos = -1
+                        return pos
+                self.manualPos = pos
+                self.drawStage()
+
+    def drawStage(self):
+        self.screen.fill(self.WHITE)
+        for x in range(self.width):
+            pygame.draw.line(self.screen, self.BLACK, (x*self.oneGridWidth, 0), (x*self.oneGridWidth, self.screenHeight))
+        for y in range(self.height):
+            pygame.draw.line(self.screen, self.BLACK, (0, y*self.oneGridHeight), (self.screenWidth, y*self.oneGridHeight))
+        for i in range(self.width):
+            for j in range(self.height):
+                if self.state[j, i] != -1:
+                    color = self.BLUE if self.state[j, i] == 1 else self.RED
+                    x = i * self.oneGridWidth + self.oneGridWidth / 2
+                    y = j * self.oneGridHeight + self.oneGridHeight / 2
+                    radius = self.oneGridWidth / 2 - 10
+                    pygame.draw.circle(self.screen, color, [x ,y], radius, 0)
+
+        if self.manualPos != -1:
+            x = self.manualPos * self.oneGridWidth + self.oneGridWidth / 2
+            y = self.oneGridHeight / 2
+            radius = self.oneGridWidth / 2 - 10
+            pygame.draw.circle(self.screen, self.RED, [x ,y], radius, 0)
+
+        if self.winner == 1:
+            message = 'You lost.'
+        elif self.winner == 2:
+            message = 'You won !!!'
+        elif self.winner == -1:
+            message = 'Game draws'
+        else:
+            message = None
+        
+        if message != None:
+            print 'message : %s' % message
+            self.screen.blit(self.fontobject.render(message, 1, self.GREEN),
+                    ((self.screenWidth / 2) - 100, (self.screenHeight / 2) - 10))
+
+        pygame.display.flip()
+        
+    def showWinner(self, winner):
+        self.winner = winner
+        self.drawStage()
+        
+        while True:
+            for event in pygame.event.get():
+                keystate = pygame.key.get_pressed()
+                if keystate[pygame.K_RETURN]:
+                    return
         
     def act(self, player, action, display=False):
         if self.gameOver == True:
@@ -159,19 +229,6 @@ class ConnectFourEnv:
                 self.state[i, x] = player
                 break
         
-        if self.display and display:
-            for i in range(self.width):
-                for j in range(self.height):
-                    if self.state[j, i] != -1:
-                        color = self.BLUE if self.state[j, i] == 1 else self.RED
-                        x = i * self.oneGridWidth + self.oneGridWidth / 2
-                        y = j * self.oneGridHeight + self.oneGridHeight / 2
-                        radius = self.oneGridWidth / 2 - 10
-                        pygame.draw.circle(self.screen, color, [x ,y], radius, 0)
-                        #print 'draw (%s, %s)' % (x, y)
-            pygame.display.flip()
-            time.sleep(0.5)
-        
         gameOver, winner = self.checkGameOver()
 
         if gameOver:
@@ -182,6 +239,10 @@ class ConnectFourEnv:
             else:
                 print 'Game over. winner : %s' % winner
             """
+        
+        if self.display and display:
+            self.drawStage()
+            #time.sleep(0.5)
             
         return self.state.copy(), gameOver, winner
 
